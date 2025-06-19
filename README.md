@@ -10,7 +10,7 @@ Supports speech-to-text, LLM-driven conversation, and text-to-speech, all via AP
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/sales_bot.git
+git clone https://github.com/kabinh07/sales_bot.git
 cd sales_bot
 ```
 
