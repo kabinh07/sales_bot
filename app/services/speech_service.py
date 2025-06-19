@@ -2,6 +2,7 @@ from transformers import pipeline
 from datasets import load_dataset
 import scipy
 import torch
+import torchaudio
 import asyncio
 import io
 import numpy as np
@@ -27,9 +28,22 @@ class SpeechService:
 
     async def process_audio_stream(self, audio_data: bytes):
         try:
+            # Load audio from bytes (supports OGG, WAV, etc.)
             audio_file = io.BytesIO(audio_data)
-            result = await asyncio.to_thread(self.stt, audio_file)
+            waveform, sample_rate = torchaudio.load(audio_file)
+            # Convert to mono if needed
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            # Resample to 16000 Hz if needed
+            target_sr = 16000
+            if sample_rate != target_sr:
+                resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=target_sr)
+                waveform = resampler(waveform)
+            audio_np = waveform.squeeze().numpy()
+            # Pass only the numpy array to the pipeline (no sampling_rate kwarg)
+            result = await asyncio.to_thread(self.stt, audio_np)
             text = result["text"] if "text" in result else ""
+            print(f"text: {text}")
             yield text
         except Exception as e:
             print(f"Error in process_audio_stream: {e}")

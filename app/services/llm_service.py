@@ -2,6 +2,7 @@ from langchain_ollama import ChatOllama
 import asyncio
 from typing import AsyncGenerator, Dict, Any
 import json
+from app.utils.vd import VECTOR_STORE
 from app.config import OLLAMA_LLM_NAME, OLLAMA_LLM_TEMPERATURE, OLLAMA_BASE_URL
 
 class LLMService:
@@ -21,13 +22,16 @@ class LLMService:
             "objection_handling": "Address any concerns the customer has raised about the course, such as price, time commitment, or relevance.",
             "closing": "Try to schedule a follow-up call or get a commitment from the customer. Provide next steps."
         }
+    
+    def __retrieve_context(self, user_message: str, k: int = 3) -> str:
+        docs = VECTOR_STORE.similarity_search(user_message, k=k)
+        return "\n".join([doc.page_content for doc in docs])
 
     async def generate_response_stream(self, 
                                    user_message: str, 
                                    conversation_history: list,
                                    state: str) -> AsyncGenerator[str, None]:
         try:
-            # Format conversation history
             messages = []
             for entry in conversation_history:
                 if entry["role"] == "user":
@@ -35,14 +39,15 @@ class LLMService:
                 else:
                     messages.append({"role": "assistant", "content": entry["content"]})
 
-            # Add current user message
             messages.append({"role": "user", "content": user_message})
 
-            # Add system message with appropriate prompt for the current state
-            system_message = {"role": "system", "content": self.prompts.get(state, self.prompts["introduction"])}
+            prompt = self.prompts.get(state, self.prompts["introduction"])
+            if state == "pitch":
+                context = self.__retrieve_context(user_message)
+                prompt = f"Context:\n{context}\n\n{prompt}"
+            system_message = {"role": "system", "content": prompt}
             messages.insert(0, system_message)
 
-            # Stream the response
             response_buffer = ""
             async for chunk in self.llm.astream(messages):
                 if chunk.content:
