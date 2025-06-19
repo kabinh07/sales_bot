@@ -1,8 +1,10 @@
 from uuid import uuid4
 from typing import Dict, List, AsyncGenerator, Union, Any
 import asyncio
+import os
 from .speech_service import SpeechService
 from .llm_service import LLMService
+from langchain.prompts import PromptTemplate
 
 class ConversationManager:
     def __init__(self):
@@ -14,9 +16,14 @@ class ConversationManager:
         call_id = str(uuid4())
         self.conversations[call_id] = []
 
-        # Generate initial greeting
-        initial_prompt = f"You are a sales agent for our education company. Introduce yourself to {customer_name} and the company briefly and professionally."
+        with open(os.path.join(os.path.dirname('.'), "prompts/initial_prompt.txt"), "r") as f:
+            prompt = f.read()
 
+        initial_prompt = PromptTemplate(
+            input_variables=["customer_name"],
+            template=prompt
+        )
+        initial_prompt = initial_prompt.format(customer_name=customer_name)
         greeting = ""
         async for chunk in self.llm_service.generate_response_stream(
             initial_prompt, [], "introduction"
