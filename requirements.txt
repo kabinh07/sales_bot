@@ -21,3 +21,4 @@ python-socketio
 numpy
 flask-cors
 python-dotenv
+datasets
