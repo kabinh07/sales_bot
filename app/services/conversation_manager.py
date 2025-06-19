@@ -12,11 +12,15 @@ class ConversationManager:
         self.speech_service = SpeechService()
         self.llm_service = LLMService()
 
-    async def start_conversation(self, phone_number: str, customer_name: str) -> Dict[str, Any]:
+    async def start_conversation(self, phone_number: str, customer_name: str):
         call_id = str(uuid4())
         self.conversations[call_id] = []
 
-        with open(os.path.join(os.path.dirname('.'), "prompts/initial_prompt.txt"), "r") as f:
+        prompt_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "prompts", "initial_prompt.txt"
+        )
+        with open(prompt_path, "r") as f:
             prompt = f.read()
 
         initial_prompt = PromptTemplate(
@@ -29,19 +33,15 @@ class ConversationManager:
             initial_prompt, [], "introduction"
         ):
             greeting += chunk
-
-        # Store in conversation history
+        greeting = greeting.split("</think>")[-1].strip()
         self.conversations[call_id].append({
             "role": "assistant",
             "content": greeting
         })
 
-        return {
-            "call_id": call_id,
-            "message": "Call started successfully",
-            "first_message": greeting
-        }
-
+        # Return both call_id and greeting text
+        return call_id, greeting
+    
     async def process_audio_message(self, 
                                  call_id: str, 
                                  audio_data: bytes) -> AsyncGenerator[Union[str, bytes], None]:
