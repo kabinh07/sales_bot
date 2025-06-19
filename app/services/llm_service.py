@@ -2,13 +2,14 @@ from langchain_ollama import ChatOllama
 import asyncio
 from typing import AsyncGenerator, Dict, Any
 import json
+from app.config import OLLAMA_LLM_NAME, OLLAMA_LLM_TEMPERATURE, OLLAMA_BASE_URL
 
 class LLMService:
     def __init__(self):
         self.llm = ChatOllama(
-            model="qwen3:14b", 
-            temperature=0.0, 
-            base_url="http://192.168.27.207:11434",
+            model=OLLAMA_LLM_NAME, 
+            temperature=OLLAMA_LLM_TEMPERATURE, 
+            base_url=OLLAMA_BASE_URL,
             streaming=True
         )
 

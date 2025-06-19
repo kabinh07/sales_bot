@@ -8,6 +8,7 @@ import asyncio
 import io
 import tempfile
 from pathlib import Path
+from app.config import HF_WHISPER_MODEL, HF_SPEECH_T5_NAME
 
 class SpeechService:
     def __init__(self):

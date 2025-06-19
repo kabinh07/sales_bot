@@ -18,6 +18,6 @@ openai-whisper
 jinja2
 aiofiles
 python-socketio
-audiorecorder
 numpy
 flask-cors
+python-dotenv
