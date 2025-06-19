@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Sales Agent Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 90vh;
+        }
+        .chat-window {
+            flex-grow: 1;
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin-bottom: 15px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 15px;
+            max-width: 70%;
+        }
+        .user {
+            align-self: flex-end;
+            background-color: #DCF8C6;
+        }
+        .agent {
+            align-self: flex-start;
+            background-color: #E5E5EA;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #cccccc;
+        }
+        input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .status {
+            margin-top: 10px;
+            font-style: italic;
+            color: #666;
+        }
+        .hidden {
+            display: none;
+        }
+        .voice-controls {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        .volume-indicator {
+            height: 20px;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 0.1s;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Voice Sales Agent</h1>
+
+    <div class="container">
+        <div id="setup" class="controls">
+            <input type="text" id="nameInput" placeholder="Your name">
+            <input type="tel" id="phoneInput" placeholder="Phone number">
+            <button id="startButton">Start Call</button>
+        </div>
+
+        <div id="chatContainer" class="hidden">
+            <div id="chatWindow" class="chat-window"></div>
+
+            <div class="controls">
+                <input type="text" id="messageInput" placeholder="Type your message...">
+                <button id="sendButton">Send</button>
+            </div>
+
+            <div class="voice-controls">
+                <button id="toggleMicButton">Start Speaking</button>
+            </div>
+
+            <div id="volumeIndicator" class="volume-indicator"></div>
+        </div>
+
+        <div id="statusMessage" class="status"></div>
+    </div>
+
+    <script>
+        // DOM elements
+        const setupDiv = document.getElementById('setup');
+        const chatContainer = document.getElementById('chatContainer');
+        const chatWindow = document.getElementById('chatWindow');
+        const nameInput = document.getElementById('nameInput');
+        const phoneInput = document.getElementById('phoneInput');
+        const messageInput = document.getElementById('messageInput');
+        const startButton = document.getElementById('startButton');
+        const sendButton = document.getElementById('sendButton');
+        const toggleMicButton = document.getElementById('toggleMicButton');
+        const statusMessage = document.getElementById('statusMessage');
+        const volumeIndicator = document.getElementById('volumeIndicator');
+
+        // App state
+        let callId = null;
+        let websocket = null;
+        let mediaRecorder = null;
+        let audioContext = null;
+        let isRecording = false;
+        let audioChunks = [];
+        let analyser = null;
+        let dataArray = null;
+
+        // Start call
+        startButton.addEventListener('click', async () => {
+            const name = nameInput.value.trim();
+            const phone = phoneInput.value.trim();
+
+            if (!name || !phone) {
+                statusMessage.textContent = 'Please enter your name and phone number';
+                return;
+            }
+
+            try {
+                statusMessage.textContent = 'Starting call...';
+
+                const response = await fetch('/start-call', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ customer_name: name, phone_number: phone })
+                });
+
+                const data = await response.json();
+                callId = data.call_id;
+
+                // Add first message from agent
+                addMessage(data.first_message, 'agent');
+
+                // Switch to chat interface
+                setupDiv.classList.add('hidden');
+                chatContainer.classList.remove('hidden');
+
+                // Initialize WebSocket
+                connectWebSocket();
+
+                // Initialize audio context
+                initAudio();
+
+                statusMessage.textContent = 'Call connected';
+            } catch (error) {
+                statusMessage.textContent = `Error: ${error.message}`;
+            }
+        });
+
+        // Send text message
+        sendButton.addEventListener('click', async () => {
+            const message = messageInput.value.trim();
+            if (!message) return;
+
+            addMessage(message, 'user');
+            messageInput.value = '';
+
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.send(message);
+            } else {
+                // Fallback to REST API
+                try {
+                    const response = await fetch(`/respond/${callId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message })
+                    });
+
+                    const data = await response.json();
+                    addMessage(data.reply, 'agent');
+                } catch (error) {
+                    statusMessage.textContent = `Error: ${error.message}`;
+                }
+            }
+        });
+
+        // Toggle microphone
+        toggleMicButton.addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+                toggleMicButton.textContent = 'Start Speaking';
+                toggleMicButton.style.backgroundColor = '#4CAF50';
+            } else {
+                startRecording();
+                toggleMicButton.textContent = 'Stop Speaking';
+                toggleMicButton.style.backgroundColor = '#f44336';
+            }
+        });
+
+        // Connect WebSocket
+        function connectWebSocket() {
+            websocket = new WebSocket(`ws://${window.location.host}/ws/${callId}`);
+
+            websocket.onopen = () => {
+                statusMessage.textContent = 'WebSocket connected';
+            };
+
+            websocket.onmessage = (event) => {
+                if (event.data instanceof Blob) {
+                    // Handle audio response
+                    playAudio(event.data);
+                } else {
+                    // Handle text response
+                    addMessage(event.data, 'agent');
+                }
+            };
+
+            websocket.onclose = () => {
+                statusMessage.textContent = 'WebSocket disconnected';
+            };
+
+            websocket.onerror = (error) => {
+                statusMessage.textContent = `WebSocket error: ${error.message}`;
+            };
+        }
+
+        // Initialize audio
+        async function initAudio() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                // Set up analyser for volume visualization
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                statusMessage.textContent = 'Audio initialized';
+            } catch (error) {
+                statusMessage.textContent = `Audio initialization error: ${error.message}`;
+            }
+        }
+
+        // Start recording
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Connect to analyser for volume visualization
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                        websocket.send(audioBlob);
+                    }
+                };
+
+                mediaRecorder.start(100); // Collect 100ms chunks
+                isRecording = true;
+
+                // Start volume visualization
+                visualizeVolume();
+            } catch (error) {
+                statusMessage.textContent = `Recording error: ${error.message}`;
+            }
+        }
+
+        // Stop recording
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+
+                // Reset volume indicator
+                volumeIndicator.style.width = '0%';
+            }
+        }
+
+        // Play audio
+        async function playAudio(audioBlob) {
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            await audio.play();
+            URL.revokeObjectURL(audioUrl); // Clean up
+        }
+
+        // Add message to chat window
+        function addMessage(message, sender) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', sender);
+            messageElement.textContent = message;
+            chatWindow.appendChild(messageElement);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // Visualize microphone volume
+        function visualizeVolume() {
+            if (!isRecording) return;
+
+            analyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+            const volume = Math.min(100, Math.round((average / 128) * 100));
+
+            volumeIndicator.style.width = `${volume}%`;
+
+            requestAnimationFrame(visualizeVolume);
+        }
+    </script>
+</body>
+</html>
